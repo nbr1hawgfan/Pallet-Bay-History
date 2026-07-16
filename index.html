@@ -59,6 +59,31 @@
 
   main{max-width:900px; margin:0 auto; padding:16px; padding-bottom:100px;}
 
+  .pulse-bar{
+    display:flex; align-items:center; justify-content:space-between; gap:10px;
+    padding:10px 14px; margin-bottom:12px; background:var(--surface); border:1px solid var(--border);
+    border-radius:12px; font-family:var(--font-mono); font-size:12.5px; color:var(--muted);
+  }
+  .pulse-bar .clock{display:flex; align-items:center; gap:7px; color:var(--text); font-weight:600;}
+  .pulse-bar .clock svg{width:14px; height:14px; color:var(--muted); flex-shrink:0;}
+  .pulse-bar .weather{display:flex; align-items:center; gap:7px;}
+  .pulse-bar .weather svg{width:15px; height:15px; color:var(--amber); flex-shrink:0;}
+  .pulse-bar .weather .temp{color:var(--text); font-weight:600;}
+  .pulse-bar .loc{font-size:10.5px; opacity:.7;}
+
+  .insight-tile{
+    display:flex; align-items:center; gap:14px; margin-bottom:14px;
+    background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
+    padding:16px; box-shadow:var(--shadow);
+  }
+  .insight-tile .figure{
+    font-family:var(--font-display); font-weight:700; font-size:30px; color:var(--amber);
+    min-width:56px; text-align:center; line-height:1;
+  }
+  .insight-tile .info{min-width:0;}
+  .insight-tile .info .lbl{font-size:11.5px; font-weight:700; text-transform:uppercase; letter-spacing:.5px; color:var(--text);}
+  .insight-tile .info .sub{font-size:11.5px; color:var(--muted); margin-top:2px; font-family:var(--font-mono);}
+
   .search-card{
     background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
     padding:16px; box-shadow:var(--shadow);
@@ -288,6 +313,27 @@
 </header>
 
 <main>
+  <div class="pulse-bar">
+    <div class="clock" id="clockDisplay">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+      <span id="clockTime">--:--</span>
+    </div>
+    <div class="weather" id="weatherDisplay">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+      <span class="temp" id="weatherTemp">—</span>
+      <span id="weatherDesc">Loading weather…</span>
+      <span class="loc">· Fort Smith, AR</span>
+    </div>
+  </div>
+
+  <div class="insight-tile" id="movesTile" style="display:none;">
+    <div class="figure" id="movesFigure">—</div>
+    <div class="info">
+      <div class="lbl" id="movesLabel">Moves logged</div>
+      <div class="sub" id="movesSub">Loading…</div>
+    </div>
+  </div>
+
   <div class="search-card">
     <div class="search-row">
       <div class="search-input-wrap">
@@ -439,6 +485,40 @@ function parseDate(s){
   return isNaN(t) ? 0 : t;
 }
 
+function dayKey(t){
+  const d = new Date(t);
+  return d.getFullYear() + '-' + d.getMonth() + '-' + d.getDate();
+}
+
+function renderMovesTile(){
+  const tile = document.getElementById('movesTile');
+  if(!ROWS.length){ tile.style.display = 'none'; return; }
+
+  // Find the most recent date actually present in the sheet — not necessarily
+  // "today," since this gets run first thing in the morning before anything
+  // new has been scanned yet.
+  let latestTs = 0;
+  for(const r of ROWS){
+    const t = parseDate(r.MovedDateTime);
+    if(t > latestTs) latestTs = t;
+  }
+  if(!latestTs){ tile.style.display = 'none'; return; }
+
+  const targetKey = dayKey(latestTs);
+  const count = ROWS.reduce((n, r) => n + (dayKey(parseDate(r.MovedDateTime)) === targetKey ? 1 : 0), 0);
+
+  const todayKey = dayKey(Date.now());
+  const isToday = targetKey === todayKey;
+  const dateLabel = new Date(latestTs).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+
+  document.getElementById('movesFigure').textContent = count.toLocaleString();
+  document.getElementById('movesLabel').textContent = isToday ? 'Moves logged today' : 'Moves logged — most recent day';
+  document.getElementById('movesSub').textContent = isToday
+    ? dateLabel + ' · updates as scans come in'
+    : dateLabel + ' (latest activity on file)';
+  tile.style.display = 'flex';
+}
+
 function loadCSV(force){
   setStatus('loading', force ? 'Refreshing inventory data…' : 'Loading inventory data…');
   const url = CSV_URL + (force ? (CSV_URL.includes('?') ? '&' : '?') + 'cachebust=' + Date.now() : '');
@@ -452,6 +532,7 @@ function loadCSV(force){
       try{ localStorage.setItem(CACHE_KEY, JSON.stringify({ rows, ts: Date.now() })); }catch(e){}
       setStatus('ok', rows.length.toLocaleString() + ' rows loaded • ' + new Date().toLocaleTimeString());
       renderRecent();
+      renderMovesTile();
     },
     error: (err) => {
       console.error(err);
@@ -459,6 +540,7 @@ function loadCSV(force){
       if(cached){
         indexRows(cached.rows);
         setStatus('err', 'Live fetch failed — showing cached data from ' + new Date(cached.ts).toLocaleString());
+        renderMovesTile();
       } else {
         setStatus('err', 'Could not load data. Check connection and refresh.');
       }
@@ -481,6 +563,7 @@ function getCache(){
     indexRows(cached.rows);
     setStatus('ok', cached.rows.length.toLocaleString() + ' rows (cached) • refreshing…');
     renderRecent();
+    renderMovesTile();
   }
   loadCSV(false);
 })();
@@ -851,6 +934,59 @@ async function captureAndRead(){
     toast('OCR read failed');
   }
 }
+
+/* ============ CLOCK ============ */
+function tickClock(){
+  document.getElementById('clockTime').textContent = new Date().toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+}
+tickClock();
+setInterval(tickClock, 1000 * 15);
+
+/* ============ WEATHER ============ */
+// Fort Smith, AR — the warehouse location. Change WEATHER_LAT/LON if this
+// gets deployed at a different site.
+const WEATHER_LAT = 35.3859, WEATHER_LON = -94.3985;
+const WEATHER_CODES = {
+  0:['Clear','M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41'],
+  1:['Mostly clear','M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41'],
+  2:['Partly cloudy','M17.5 19a4.5 4.5 0 0 0 0-9 6 6 0 0 0-11.6 1.5A4 4 0 0 0 6 19h11.5z'],
+  3:['Overcast','M17.5 19a4.5 4.5 0 0 0 0-9 6 6 0 0 0-11.6 1.5A4 4 0 0 0 6 19h11.5z'],
+  45:['Fog','M3 8h18M3 12h18M3 16h18'],
+  48:['Fog','M3 8h18M3 12h18M3 16h18'],
+  51:['Light drizzle','M16 13v8M8 13v8M12 15v8M20 16.58A5 5 0 0 0 18 7h-1.26A8 8 0 1 0 4 15.25'],
+  53:['Drizzle','M16 13v8M8 13v8M12 15v8M20 16.58A5 5 0 0 0 18 7h-1.26A8 8 0 1 0 4 15.25'],
+  55:['Heavy drizzle','M16 13v8M8 13v8M12 15v8M20 16.58A5 5 0 0 0 18 7h-1.26A8 8 0 1 0 4 15.25'],
+  61:['Light rain','M16 13v8M8 13v8M12 15v8M20 16.58A5 5 0 0 0 18 7h-1.26A8 8 0 1 0 4 15.25'],
+  63:['Rain','M16 13v8M8 13v8M12 15v8M20 16.58A5 5 0 0 0 18 7h-1.26A8 8 0 1 0 4 15.25'],
+  65:['Heavy rain','M16 13v8M8 13v8M12 15v8M20 16.58A5 5 0 0 0 18 7h-1.26A8 8 0 1 0 4 15.25'],
+  71:['Light snow','M12 2v20M4.93 4.93l14.14 14.14M19.07 4.93 4.93 19.07'],
+  73:['Snow','M12 2v20M4.93 4.93l14.14 14.14M19.07 4.93 4.93 19.07'],
+  75:['Heavy snow','M12 2v20M4.93 4.93l14.14 14.14M19.07 4.93 4.93 19.07'],
+  80:['Rain showers','M16 13v8M8 13v8M12 15v8M20 16.58A5 5 0 0 0 18 7h-1.26A8 8 0 1 0 4 15.25'],
+  81:['Rain showers','M16 13v8M8 13v8M12 15v8M20 16.58A5 5 0 0 0 18 7h-1.26A8 8 0 1 0 4 15.25'],
+  82:['Heavy showers','M16 13v8M8 13v8M12 15v8M20 16.58A5 5 0 0 0 18 7h-1.26A8 8 0 1 0 4 15.25'],
+  95:['Thunderstorm','M13 2 4 14h6l-1 8 9-12h-6l1-8z'],
+  96:['Thunderstorm','M13 2 4 14h6l-1 8 9-12h-6l1-8z'],
+  99:['Severe storm','M13 2 4 14h6l-1 8 9-12h-6l1-8z']
+};
+
+function loadWeather(){
+  const url = `https://api.open-meteo.com/v1/forecast?latitude=${WEATHER_LAT}&longitude=${WEATHER_LON}&current=temperature_2m,weather_code&temperature_unit=fahrenheit&timezone=auto`;
+  fetch(url).then(r => r.json()).then(data => {
+    const cur = data.current;
+    if(!cur) throw new Error('no current block');
+    const temp = Math.round(cur.temperature_2m);
+    const info = WEATHER_CODES[cur.weather_code] || ['—', WEATHER_CODES[0][1]];
+    document.getElementById('weatherTemp').textContent = temp + '°F';
+    document.getElementById('weatherDesc').textContent = info[0];
+    document.querySelector('#weatherDisplay svg').innerHTML = `<path d="${info[1]}"/>`;
+  }).catch(e => {
+    console.warn('Weather fetch failed', e);
+    document.getElementById('weatherDesc').textContent = 'Weather unavailable';
+  });
+}
+loadWeather();
+setInterval(loadWeather, 1000 * 60 * 15);
 
 /* ============ SERVICE WORKER ============ */
 if('serviceWorker' in navigator){

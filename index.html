@@ -835,27 +835,41 @@ async function openScanModal(){
   scanStatus.textContent = 'Starting camera…';
   try{
     zxingReader = new ZXing.BrowserMultiFormatReader();
-    const devices = await ZXing.BrowserCodeReader.listVideoInputDevices();
-    const backCam = devices.find(d => /back|rear|environment/i.test(d.label)) || devices[devices.length - 1];
-    const deviceId = backCam ? backCam.deviceId : undefined;
-
-    zxingReader.decodeFromVideoDevice(deviceId, scanVideo, (result, err) => {
-      if(result){
-        const text = result.getText();
-        scanStatus.textContent = 'Found: ' + text;
-        navigator.vibrate?.(80);
-        searchInput.value = text;
-        closeScanModal();
-        runSearch(text);
-      }
-    }).then(() => { scanStatus.textContent = 'Point camera at the pallet tag barcode'; })
-      .catch(e => { scanStatus.textContent = 'Camera error — check permissions'; console.error(e); });
+    await startScanWithConstraints({ video: { facingMode: { ideal: 'environment' } } });
   }catch(e){
-    console.error(e);
-    scanStatus.textContent = 'Could not start camera';
-    toast('Camera unavailable');
+    console.warn('Environment-facing camera failed, retrying with any camera', e);
+    try{
+      await startScanWithConstraints({ video: true });
+    }catch(e2){
+      console.error(e2);
+      scanStatus.textContent = describeCameraError(e2);
+      toast('Camera unavailable');
+    }
   }
 }
+
+function startScanWithConstraints(constraints){
+  return zxingReader.decodeFromConstraints(constraints, scanVideo, (result, err) => {
+    if(result){
+      const text = result.getText();
+      scanStatus.textContent = 'Found: ' + text;
+      navigator.vibrate?.(80);
+      searchInput.value = text;
+      closeScanModal();
+      runSearch(text);
+    }
+  }).then(() => { scanStatus.textContent = 'Point camera at the pallet tag barcode'; });
+}
+
+function describeCameraError(e){
+  const name = e && e.name;
+  if(name === 'NotAllowedError' || name === 'SecurityError') return 'Camera permission denied — check site settings';
+  if(name === 'NotFoundError' || name === 'OverconstrainedError') return 'No usable camera found on this device';
+  if(name === 'NotReadableError') return 'Camera is in use by another app';
+  if(!window.isSecureContext) return 'Camera needs HTTPS — check the URL';
+  return 'Could not start camera' + (name ? ' (' + name + ')' : '');
+}
+
 function closeScanModal(){
   scanModal.classList.remove('open');
   try{ zxingReader && zxingReader.reset(); }catch(e){}
@@ -898,7 +912,7 @@ async function openOcrModal(){
     ocrStatus.textContent = 'Frame the printed ID, then capture';
   }catch(e){
     console.error(e);
-    ocrStatus.textContent = 'Could not start camera';
+    ocrStatus.textContent = describeCameraError(e);
     toast('Camera unavailable');
   }
 }
